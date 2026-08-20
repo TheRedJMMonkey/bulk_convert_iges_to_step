@@ -1,0 +1,67 @@
+import os
+import FreeCAD
+import ImportGui
+from freecad import module_io
+from PySide import QtWidgets
+
+# Show file selection dialog for multiple IGES files
+dialog = QtWidgets.QFileDialog()
+dialog.setFileMode(QtWidgets.QFileDialog.ExistingFiles)
+dialog.setNameFilter("IGES files (*.igs *.iges)")
+dialog.setWindowTitle("Select IGES Files")
+if dialog.exec_():
+    iges_files = dialog.selectedFiles()
+else:
+    iges_files = []
+
+# Exit if no files selected
+if not iges_files:
+    print("No IGES files selected.")
+else:
+    for iges_path in iges_files:
+        folder = os.path.dirname(iges_path)
+        filename = os.path.basename(iges_path)
+        stepout_dir = os.path.join(folder, "stepout")
+        if not os.path.exists(stepout_dir):
+            os.makedirs(stepout_dir)
+
+        step_path = os.path.join(stepout_dir, os.path.splitext(filename)[0] + ".step")
+
+        # Close current document if open
+        if FreeCAD.ActiveDocument:
+            FreeCAD.closeDocument(FreeCAD.ActiveDocument.Name)
+
+        # Import IGES using module_io
+        module_io.OpenInsertObject("Part", iges_path, "open")
+
+        doc = FreeCAD.ActiveDocument
+        objs = doc.Objects
+
+        if objs:
+            # Compute bounding box of all objects
+            bbox = objs[0].Shape.BoundBox
+            for obj in objs[1:]:
+                bbox.add(obj.Shape.BoundBox)
+
+            # Calculate translation vector to move bbox min corner to origin
+            shift = FreeCAD.Vector(-bbox.XMin, -bbox.YMin, -bbox.ZMin)
+
+            # Apply translation directly to each object
+            for obj in objs:
+                obj.Placement.Base += shift
+
+            # Create a group and add shifted objects
+            group = doc.addObject("App::DocumentObjectGroup", "ShiftedGroup")
+            for obj in objs:
+                group.addObject(obj)
+
+            doc.recompute()
+
+            # Export the group object
+            ImportGui.export([group], step_path)
+            print(f"Exported: {step_path}")
+        else:
+            print(f"Skipped (no objects): {filename}")
+
+        # Close the document after export
+        FreeCAD.closeDocument(doc.Name)
