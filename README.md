@@ -18,7 +18,7 @@ The exported STEP file will be named the same as the source file, with the `.ste
 
 ## Installation
 
-1. Download the [bulk_convert_iges_to_step.FCMacro](bulk_convert_iges_to_step.FCMacro) FreeCAD macro (right-click the link and select "Save Link As") to your User Macro Location (`%APPDATA%/FreeCAD/Macro/` by default on Windows)
+1. Download the [bulk_convert_iges_to_step.FCMacro](https://raw.githubusercontent.com/TheRedJMMonkey/bulk_convert_iges_to_step/main/bulk_convert_iges_to_step.FCMacro) FreeCAD macro (right-click the link and select "Save Link As") to your User Macro Location (`%APPDATA%/FreeCAD/Macro/` by default on Windows)
 
 ## Behavior
 
