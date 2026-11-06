@@ -1,67 +1,76 @@
+"""Bulk-convert IGES files to STEP files.
+
+Each selected IGES file is read as a single shape, moved so that the minimum
+corner of its exact bounding box sits at the origin, and written to a `stepout`
+folder next to the source file.
+
+The move is baked into the geometry. It is deliberately not applied as an
+object Placement and the shape is not wrapped in a group, because that makes
+the exported STEP a nested assembly (a parent product plus an
+ITEM_DEFINED_TRANSFORMATION offset), which some importers, such as Bend-Tech
+DragonCAM, fail to read.
+"""
+
 import os
+from typing import Final
+
 import FreeCAD
-import ImportGui
-from freecad import module_io
+import Part
 from PySide import QtWidgets
 
-# Show file selection dialog for multiple IGES files
-dialog = QtWidgets.QFileDialog()
-dialog.setFileMode(QtWidgets.QFileDialog.ExistingFiles)
-dialog.setNameFilter("IGES files (*.igs *.iges)")
-dialog.setWindowTitle("Select IGES Files")
-if dialog.exec_():
-    iges_files = dialog.selectedFiles()
-else:
-    iges_files = []
+OUTPUT_FOLDER_NAME: Final = "stepout"
+DIALOG_TITLE: Final = "Select IGES Files"
+IGES_FILTER: Final = "IGES files (*.igs *.iges)"
 
-# Exit if no files selected
-if not iges_files:
-    print("No IGES files selected.")
-else:
-    for iges_path in iges_files:
-        folder = os.path.dirname(iges_path)
-        filename = os.path.basename(iges_path)
-        stepout_dir = os.path.join(folder, "stepout")
-        if not os.path.exists(stepout_dir):
-            os.makedirs(stepout_dir)
 
-        step_path = os.path.join(stepout_dir, os.path.splitext(filename)[0] + ".step")
+def select_iges_files() -> list[str]:
+    paths, _selected_filter = QtWidgets.QFileDialog.getOpenFileNames(
+        None, DIALOG_TITLE, "", IGES_FILTER
+    )
+    return paths
 
-        # Close current document if open
-        if FreeCAD.ActiveDocument:
-            FreeCAD.closeDocument(FreeCAD.ActiveDocument.Name)
 
-        # Import IGES using module_io
-        module_io.OpenInsertObject("Part", iges_path, "open")
+def convert(iges_path: str) -> str:
+    """Convert one IGES file and return the path of the STEP file written."""
+    output_dir = os.path.join(os.path.dirname(iges_path), OUTPUT_FOLDER_NAME)
+    os.makedirs(output_dir, exist_ok=True)
+    step_path = os.path.join(
+        output_dir, os.path.splitext(os.path.basename(iges_path))[0] + ".step"
+    )
 
-        doc = FreeCAD.ActiveDocument
-        objs = doc.Objects
+    shape = Part.read(iges_path)
+    if shape.isNull():
+        raise ValueError("no geometry found in file")
 
-        if objs:
-            # Compute bounding box of all objects
-            bbox = objs[0].Shape.BoundBox
-            for obj in objs[1:]:
-                bbox.add(obj.Shape.BoundBox)
+    # The exact (non-tolerance-padded) box puts the part on the origin to within
+    # floating-point error; Shape.BoundBox is padded by the shape tolerance.
+    bbox = shape.optimalBoundingBox(False, False)
+    matrix = FreeCAD.Matrix()
+    matrix.move(FreeCAD.Vector(-bbox.XMin, -bbox.YMin, -bbox.ZMin))
 
-            # Calculate translation vector to move bbox min corner to origin
-            shift = FreeCAD.Vector(-bbox.XMin, -bbox.YMin, -bbox.ZMin)
+    # copy=True rewrites the geometry itself. copy=False would only attach a
+    # location to the shape, which is the thing that must not reach the STEP.
+    shape.transformShape(matrix, True)
 
-            # Apply translation directly to each object
-            for obj in objs:
-                obj.Placement.Base += shift
+    shape.exportStep(step_path)
+    return step_path
 
-            # Create a group and add shifted objects
-            group = doc.addObject("App::DocumentObjectGroup", "ShiftedGroup")
-            for obj in objs:
-                group.addObject(obj)
 
-            doc.recompute()
+def main() -> None:
+    iges_paths = select_iges_files()
+    if not iges_paths:
+        print("No IGES files selected.")
+        return
 
-            # Export the group object
-            ImportGui.export([group], step_path)
-            print(f"Exported: {step_path}")
-        else:
-            print(f"Skipped (no objects): {filename}")
+    failed: list[str] = []
+    for iges_path in iges_paths:
+        try:
+            print(f"Exported: {convert(iges_path)}")
+        except Exception as error:
+            failed.append(iges_path)
+            print(f"FAILED: {os.path.basename(iges_path)}: {error}")
 
-        # Close the document after export
-        FreeCAD.closeDocument(doc.Name)
+    print(f"Done: {len(iges_paths) - len(failed)} converted, {len(failed)} failed.")
+
+
+main()
